@@ -58,12 +58,15 @@ export class NotebookViewModel extends WindowedListModel {
 
     const nLines = model.sharedModel.getSource().split('\n').length;
     let outputsLines = 0;
-    if (model instanceof CodeCellModel) {
+    if (model instanceof CodeCellModel && !model.isDisposed) {
       for (let outputIdx = 0; outputIdx < model.outputs.length; outputIdx++) {
         const output = model.outputs.get(outputIdx);
-        outputsLines = ((output.data['text/plain'] as string) ?? '').split(
-          '\n'
-        ).length;
+        const data = output.data['text/plain'];
+        if (typeof data === 'string') {
+          outputsLines += data.split('\n').length;
+        } else if (Array.isArray(data)) {
+          outputsLines += data.join('').split('\n').length;
+        }
       }
     }
     return (

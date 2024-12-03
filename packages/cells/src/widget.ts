@@ -828,6 +828,11 @@ export namespace Cell {
     maxNumberOutputs?: number;
 
     /**
+     * Show placeholder text for standard input
+     */
+    showInputPlaceholder?: boolean;
+
+    /**
      * Whether to split stdin line history by kernel session or keep globally accessible.
      */
     inputHistoryScope?: 'global' | 'session';
@@ -1113,7 +1118,8 @@ export class CodeCell extends Cell<ICodeCellModel> {
       maxNumberOutputs: this.maxNumberOutputs,
       translator: this.translator,
       promptOverlay: true,
-      inputHistoryScope: options.inputHistoryScope
+      inputHistoryScope: options.inputHistoryScope,
+      showInputPlaceholder: options.showInputPlaceholder
     }));
     output.node.addEventListener('keydown', this._detectCaretMovementInOuput);
 
@@ -1409,26 +1415,30 @@ export class CodeCell extends Cell<ICodeCellModel> {
     // to changes in metadata until we have fully committed our changes.
     // Otherwise setting one key can trigger a write to the other key to
     // maintain the synced consistency.
-    this.model.sharedModel.transact(() => {
-      super.saveCollapseState();
+    this.model.sharedModel.transact(
+      () => {
+        super.saveCollapseState();
 
-      const collapsed = this.model.getMetadata('collapsed');
+        const collapsed = this.model.getMetadata('collapsed');
 
-      if (
-        (this.outputHidden && collapsed === true) ||
-        (!this.outputHidden && collapsed === undefined)
-      ) {
-        return;
-      }
+        if (
+          (this.outputHidden && collapsed === true) ||
+          (!this.outputHidden && collapsed === undefined)
+        ) {
+          return;
+        }
 
-      // Do not set jupyter.outputs_hidden since it is redundant. See
-      // and https://github.com/jupyter/nbformat/issues/137
-      if (this.outputHidden) {
-        this.model.setMetadata('collapsed', true);
-      } else {
-        this.model.deleteMetadata('collapsed');
-      }
-    }, false);
+        // Do not set jupyter.outputs_hidden since it is redundant. See
+        // and https://github.com/jupyter/nbformat/issues/137
+        if (this.outputHidden) {
+          this.model.setMetadata('collapsed', true);
+        } else {
+          this.model.deleteMetadata('collapsed');
+        }
+      },
+      false,
+      'silent-change'
+    );
   }
 
   /**
@@ -1741,9 +1751,13 @@ export namespace CodeCell {
     const model = cell.model;
     const code = model.sharedModel.getSource();
     if (!code.trim() || !sessionContext.session?.kernel) {
-      model.sharedModel.transact(() => {
-        model.clearExecution();
-      }, false);
+      model.sharedModel.transact(
+        () => {
+          model.clearExecution();
+        },
+        false,
+        'silent-change'
+      );
       return;
     }
     const cellId = { cellId: model.sharedModel.getId() };
@@ -1753,10 +1767,14 @@ export namespace CodeCell {
       ...cellId
     };
     const { recordTiming } = metadata;
-    model.sharedModel.transact(() => {
-      model.clearExecution();
-      cell.outputHidden = false;
-    }, false);
+    model.sharedModel.transact(
+      () => {
+        model.clearExecution();
+        cell.outputHidden = false;
+      },
+      false,
+      'silent-change'
+    );
     // note: in future we would like to distinguish running from scheduled
     model.executionState = 'running';
     model.trusted = true;
@@ -1955,7 +1973,8 @@ export abstract class AttachmentsCell<
    * Handle the `paste` event for the widget
    */
   private _evtPaste(event: ClipboardEvent): void {
-    if (event.clipboardData) {
+    const isEditable = this.model.getMetadata('editable') ?? true;
+    if (event.clipboardData && isEditable) {
       const items = event.clipboardData.items;
       for (let i = 0; i < items.length; i++) {
         if (items[i].type === 'text/plain') {
