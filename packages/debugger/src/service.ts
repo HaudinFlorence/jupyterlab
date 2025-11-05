@@ -457,7 +457,9 @@ export class DebuggerService implements IDebugger, IDisposable {
         ? this.session?.connection?.name || '-'
         : '-';
     }
-    const breakpoints = await this._migrateBreakpoints(oldDebuggerState);
+    const breakpoints =
+      this._oldSessionBreakpoints ??
+      (await this._migrateBreakpoints(oldDebuggerState));
 
     // Merge kernel breakpoints with existing breakpoints, avoiding duplicates
     for (const [path, kernelBpList] of kernelBreakpoints) {
@@ -703,11 +705,17 @@ export class DebuggerService implements IDebugger, IDisposable {
   async restoreDebuggerState(state: IDebugger.State): Promise<boolean> {
     await this.start();
 
-    const breakpoints = await this._migrateBreakpoints(state);
+    this._oldSessionBreakpoints = await this._migrateBreakpoints(state);
+    await this._restoreBreakpoints(this._oldSessionBreakpoints);
 
-    await this._restoreBreakpoints(breakpoints);
     const config = await this.session!.sendRequest('configurationDone', {});
     await this.restoreState(false);
+
+    this._oldSessionBreakpoints = new Map<
+      string,
+      IDebugger.IBreakpoint[]
+    >(); /* reset it to an empty Map */
+
     return config.success;
   }
 
@@ -1045,6 +1053,7 @@ export class DebuggerService implements IDebugger, IDisposable {
   private _specsManager: KernelSpec.IManager | null;
   private _trans: TranslationBundle;
   private _pauseOnExceptionChanged = new Signal<IDebugger, void>(this);
+  private _oldSessionBreakpoints: Map<string, IDebugger.IBreakpoint[]>;
 }
 
 /**
