@@ -5,6 +5,8 @@
  * @module debugger
  */
 
+export { FileHandler } from './handlers/file';
+
 export { Debugger } from './debugger';
 
 export { DebuggerDisplayRegistry } from './displayregistry';

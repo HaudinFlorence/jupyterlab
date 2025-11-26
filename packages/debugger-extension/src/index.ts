@@ -25,7 +25,7 @@ import {
 } from '@jupyterlab/apputils';
 import { IEditorServices } from '@jupyterlab/codeeditor';
 import { ConsolePanel, IConsoleTracker } from '@jupyterlab/console';
-import { PageConfig, PathExt } from '@jupyterlab/coreutils';
+import { PageConfig, PathExt, URLExt } from '@jupyterlab/coreutils';
 import {
   Debugger,
   DebuggerDisplayRegistry,
@@ -50,7 +50,7 @@ import {
   IRenderMimeRegistry,
   RenderMimeRegistry
 } from '@jupyterlab/rendermime';
-import { Session } from '@jupyterlab/services';
+import { ServerConnection, Session } from '@jupyterlab/services';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import {
   ITranslator,
@@ -64,6 +64,8 @@ import { DebugConsoleCellExecutor } from './debug-console-executor';
 import { DebuggerCompletionProvider } from './debugger-completion-provider';
 import { isCodeCellModel } from '@jupyterlab/cells';
 import { Widget } from '@lumino/widgets';
+import { IDocumentManager } from '@jupyterlab/docmanager';
+import { FileHandler } from '@jupyterlab/debugger';
 
 function notifyCommands(commands: CommandRegistry): void {
   Object.values(Debugger.CommandIDs).forEach(command => {
@@ -81,6 +83,45 @@ function updateState(commands: CommandRegistry, debug: IDebugger): void {
     delete document.body.dataset.jpDebuggerStoppedThreads;
   }
   notifyCommands(commands);
+}
+
+async function requestAPI<T>(
+  endpoint: string,
+  init: RequestInit = {},
+  serverSettings?: ServerConnection.ISettings
+): Promise<T> {
+  const settings = serverSettings ?? ServerConnection.makeSettings();
+  const requestUrl = URLExt.join(settings.baseUrl, endpoint);
+
+  let response: Response;
+  try {
+    response = await ServerConnection.makeRequest(requestUrl, init, settings);
+  } catch (error) {
+    throw new ServerConnection.NetworkError(error);
+  }
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new ServerConnection.ResponseError(response, data.message);
+  }
+  return data;
+}
+
+export async function resolvePath(
+  path: string,
+  kernelId?: string
+): Promise<any> {
+  const query = new URLSearchParams({ path });
+  if (kernelId) {
+    query.append('kernel', kernelId);
+  }
+
+  const endpoint = `api/resolvePath?${query.toString()}`;
+
+  return await requestAPI<{ resolved: any }>(endpoint, {
+    method: 'GET'
+  });
 }
 
 /**
@@ -849,7 +890,8 @@ const sourceViewer: JupyterFrontEndPlugin<IDebugger.ISourceViewer> = {
     IEditorServices,
     IDebuggerSources,
     ITranslator,
-    IDebuggerHandler
+    IDebuggerHandler,
+    IDocumentManager
   ],
   provides: IDebuggerSourceViewer,
   autoStart: true,
@@ -859,13 +901,15 @@ const sourceViewer: JupyterFrontEndPlugin<IDebugger.ISourceViewer> = {
     editorServices: IEditorServices,
     debuggerSources: IDebugger.ISources,
     translator: ITranslator,
-    handler: Debugger.Handler
+    handler: Debugger.Handler,
+    docManager: IDocumentManager
   ): Promise<IDebugger.ISourceViewer> => {
     let previousEditorWidget: Widget | null = null;
     const readOnlyEditorFactory = new Debugger.ReadOnlyEditorFactory({
       editorServices
     });
     const { model } = service;
+    const handlers: { [id: string]: FileHandler } = {};
 
     const onCurrentFrameChanged = async (
       _: IDebugger.Model.ICallstack,
@@ -886,15 +930,23 @@ const sourceViewer: JupyterFrontEndPlugin<IDebugger.ISourceViewer> = {
     };
     model.callstack.currentFrameChanged.connect(onCurrentFrameChanged);
 
-    const openSource = (
+    const openSource = async (
       source: IDebugger.Source,
       breakpointOrFrame?: IDebugger.IBreakpoint | IDebugger.IStackFrame,
       openedByDebugger = false
-    ): void => {
+    ): Promise<void> => {
       if (!source) {
         return;
       }
       const { content, mimeType, path } = source;
+
+      let resolvedPath: { resolved: any } | undefined = undefined;
+      try {
+        resolvedPath = await resolvePath(path);
+      } catch (err) {
+        console.warn('resolvePath failed:', err);
+      }
+
       if (breakpointOrFrame && typeof breakpointOrFrame.line !== 'undefined') {
         const results = debuggerSources.find({
           focus: true,
@@ -921,6 +973,62 @@ const sourceViewer: JupyterFrontEndPlugin<IDebugger.ISourceViewer> = {
           });
           return;
         }
+      }
+
+      if (
+        resolvedPath &&
+        resolvedPath.resolved[0] &&
+        resolvedPath.resolved[0].scope === 'server'
+      ) {
+        const actualPath = resolvedPath.resolved[0].path;
+        const widget = docManager.openOrReveal(actualPath);
+
+        if (!widget) {
+          return;
+        }
+
+        await widget.revealed;
+        if (handlers[widget.id]) {
+          return;
+        }
+        handlers[widget.id] = new FileHandler({
+          debuggerService: service,
+          widget: widget as DocumentWidget<FileEditor>
+          // translator: trans. || undefined
+        });
+
+        if (
+          breakpointOrFrame &&
+          typeof breakpointOrFrame.line !== 'undefined'
+        ) {
+          const results = debuggerSources.find({
+            focus: true,
+            kernel: service.session?.connection?.kernel?.name ?? '',
+            path: actualPath,
+            //source: service.config.getCodeId(content, service.session?.connection?.kernel?.name ?? ''),
+            source: actualPath
+          });
+
+          if (results.length > 0) {
+            results.forEach(editor => {
+              void editor.reveal().then(() => {
+                const edit = editor.get();
+                if (edit) {
+                  edit.revealPosition({
+                    line: (breakpointOrFrame.line as number) - 1,
+                    column: breakpointOrFrame.column || 0
+                  });
+                  Debugger.EditorHandler.showCurrentLine(
+                    edit,
+                    breakpointOrFrame.line as number
+                  );
+                }
+              });
+            });
+            return;
+          }
+        }
+        return;
       }
 
       if (

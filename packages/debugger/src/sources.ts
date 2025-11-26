@@ -186,7 +186,7 @@ export class DebuggerSources implements IDebugger.ISources {
     if (!this._editorTracker) {
       return [];
     }
-    const { focus, kernel, path, source } = params;
+    const { focus /*, kernel*/, path, source } = params;
 
     const editors: IDebugger.ISources.IEditor[] = [];
     this._editorTracker.forEach(doc => {
@@ -194,20 +194,21 @@ export class DebuggerSources implements IDebugger.ISources {
       if (path !== fileEditor.context.path) {
         return;
       }
-
+      console.log('In _findInEditors, source:', source);
+      console.log('In _findInEditors, path:', path);
       const editor = fileEditor.editor;
       if (!editor) {
         return;
       }
 
-      const code = editor.model.sharedModel.getSource();
+      /*const code = editor.model.sharedModel.getSource();
       const codeId = this._getCodeId(code, kernel);
       if (!codeId) {
         return;
       }
       if (source !== codeId) {
         return;
-      }
+      }*/
       editors.push(
         Object.freeze({
           get: () => editor,
