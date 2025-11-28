@@ -947,6 +947,7 @@ const sourceViewer: JupyterFrontEndPlugin<IDebugger.ISourceViewer> = {
         console.warn('resolvePath failed:', err);
       }
 
+      /* Read only editors */
       if (breakpointOrFrame && typeof breakpointOrFrame.line !== 'undefined') {
         const results = debuggerSources.find({
           focus: true,
@@ -975,6 +976,7 @@ const sourceViewer: JupyterFrontEndPlugin<IDebugger.ISourceViewer> = {
         }
       }
 
+      /* external modules : read and write editors */
       if (
         resolvedPath &&
         resolvedPath.resolved[0] &&
@@ -993,8 +995,9 @@ const sourceViewer: JupyterFrontEndPlugin<IDebugger.ISourceViewer> = {
         }
         handlers[widget.id] = new FileHandler({
           debuggerService: service,
-          widget: widget as DocumentWidget<FileEditor>
-          // translator: trans. || undefined
+          widget: widget as DocumentWidget<FileEditor>,
+          // translator: trans. || undefined,
+          path: actualPath
         });
 
         if (

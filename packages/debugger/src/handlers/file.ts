@@ -28,6 +28,7 @@ export class FileHandler implements IDisposable {
     this._debuggerService = options.debuggerService;
     this._fileEditor = options.widget.content;
     this.translator = options.translator || nullTranslator;
+    this._path = options.path || undefined;
 
     this._hasLineNumber =
       (this._fileEditor.editor.getOption('lineNumbers') as
@@ -37,7 +38,8 @@ export class FileHandler implements IDisposable {
       debuggerService: this._debuggerService,
       editorReady: () => Promise.resolve(this._fileEditor.editor),
       getEditor: () => this._fileEditor.editor,
-      src: this._fileEditor.model.sharedModel
+      src: this._fileEditor.model.sharedModel,
+      path: this._path || undefined
     });
 
     this._pausedOverlay = new DebuggerPausedOverlay({
@@ -99,6 +101,7 @@ export class FileHandler implements IDisposable {
   private _pausedOverlay: DebuggerPausedOverlay;
   private _hasLineNumber: boolean;
   protected translator: ITranslator;
+  private _path?: string | undefined;
 }
 
 /**
@@ -123,5 +126,9 @@ export namespace FileHandler {
      * The application language translator.
      */
     translator?: ITranslator;
+    /**
+     * The source path
+     */
+    path?: string;
   }
 }
